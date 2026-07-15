@@ -1,0 +1,21 @@
+# Rust build output
+/target/
+
+# Downloader output and partial files
+/downloads/
+*.part
+*.tmp.mp4
+
+# Authentication and local secrets
+cookie.dat
+*.cookie
+.env
+.env.*
+!.env.example
+
+# Logs and editor/OS metadata
+*.log
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,25 @@
+[package]
+name = "bildowner"
+version = "1.0.0-alpha"
+edition = "2024"
+authors = ["SorMaze"]
+description = "A command-line Bilibili DASH video downloader written in Rust"
+license = "BSD-2-Clause"
+readme = "README.md"
+repository = "https://github.com/Booklight12/BilDowner"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+futures-util = "0.3"
+indicatif = "0.18"
+md5 = "0.8"
+qrcode = { version = "0.14", default-features = false }
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "time"] }
+url = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }

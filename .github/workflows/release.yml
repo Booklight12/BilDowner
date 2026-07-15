@@ -1,0 +1,69 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    name: Build Windows release
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Verify tag and package version
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+          $packageVersion = $metadata.packages[0].version
+          $tagVersion = "${{ github.ref_name }}" -replace '^v', ''
+          if ($packageVersion -ne $tagVersion) {
+            throw "Tag version '$tagVersion' does not match Cargo version '$packageVersion'."
+          }
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Run Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Build optimized executable
+        run: cargo build --release --locked
+
+      - name: Package and publish prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $assetBase = "BilDowner-$tag-windows-x86_64"
+          $dist = Join-Path $PWD "dist"
+          New-Item -ItemType Directory -Path $dist -Force | Out-Null
+
+          $exe = Join-Path $dist "$assetBase.exe"
+          $zip = Join-Path $dist "$assetBase.zip"
+          $checksums = Join-Path $dist "SHA256SUMS.txt"
+
+          Copy-Item "target/release/bildowner.exe" $exe
+          Compress-Archive -Path $exe, "README.md", "LICENSE" -DestinationPath $zip
+
+          $checksumLines = foreach ($file in @($exe, $zip)) {
+            $hash = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLowerInvariant()
+            "$hash  $([System.IO.Path]::GetFileName($file))"
+          }
+          Set-Content -Path $checksums -Value $checksumLines -Encoding utf8
+
+          gh release create $tag $exe $zip $checksums `
+            --verify-tag `
+            --title "BilDowner 1.0.0 Alpha" `
+            --prerelease `
+            --generate-notes
