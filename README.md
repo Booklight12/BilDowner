@@ -3,8 +3,7 @@
 [![Release](https://github.com/Booklight12/BilDowner/actions/workflows/release.yml/badge.svg)](https://github.com/Booklight12/BilDowner/actions/workflows/release.yml)
 [![License: BSD-2-Clause](https://img.shields.io/badge/License-BSD--2--Clause-blue.svg)](LICENSE)
 
-BilDowner 是一个纯 Rust 命令行 Bilibili 视频下载器，不包含前端页面。它参考本机 Edge 扩展“bilibili哔哩哔哩下载助手”3.0.4 的下载链路：通过 `x/player/wbi/playurl` 获取 DASH 流，分别下载视频和音频，再调用 FFmpeg 以 `copy` 模式封装为 MP4，不进行有损重新编码。
-
+BilDowner 是一个纯 Rust 命令行 Bilibili 视频下载器，不包含前端页面.
 当前版本：**1.0.0 Alpha**。
 
 请只下载你有权保存的内容。本工具不会绕过 DRM、付费或账号权限；接口返回的清晰度取决于当前账号本身具有的播放权限。
