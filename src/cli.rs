@@ -6,7 +6,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 #[command(
     name = "bildowner",
     version,
-    about = "纯命令行 Bilibili DASH 视频下载器"
+    about = "纯命令行 Bilibili / 抖音视频下载器"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -20,9 +20,9 @@ pub enum Command {
         #[command(subcommand)]
         command: AuthCommand,
     },
-    /// 查看分 P、可用清晰度和编码
+    /// 查看视频信息；Bilibili 还会显示分 P、清晰度和编码
     Info {
-        /// BV/AV/ep/ss 号或 Bilibili 视频链接
+        /// BV/AV/ep/ss 号、Bilibili 链接或抖音分享链接
         input: String,
         /// 分 P 序号，从 1 开始
         #[arg(short, long, default_value_t = 1)]
@@ -53,7 +53,7 @@ pub enum AuthCommand {
 
 #[derive(Debug, Args)]
 pub struct DownloadArgs {
-    /// BV/AV/ep/ss 号或 Bilibili 视频链接
+    /// BV/AV/ep/ss 号、Bilibili 链接或抖音分享链接
     pub input: String,
 
     /// 清晰度：best、360p、480p、720p、1080p、1080p+、1080p60、4k、hdr、dolby、8k 或数值 qn

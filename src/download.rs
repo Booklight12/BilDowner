@@ -1,18 +1,13 @@
 use std::{path::Path, process::Stdio};
 
 use anyhow::{Context, Result, bail};
-use futures_util::StreamExt;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use reqwest::{StatusCode, header::RANGE};
-use tokio::{
-    fs::{self, OpenOptions},
-    io::AsyncWriteExt,
-    process::Command,
-};
+use indicatif::MultiProgress;
+use tokio::{fs, process::Command};
 
 use crate::{
     api::{BiliClient, DashStream, codec_name},
     cli::{DownloadArgs, DownloadMode},
+    http_download,
 };
 
 pub async fn run(client: &BiliClient, args: DownloadArgs) -> Result<()> {
@@ -124,119 +119,11 @@ async fn download_stream(
     progress: &MultiProgress,
     force: bool,
 ) -> Result<()> {
-    if destination.exists() && !force {
-        println!("{label}已存在，跳过：{}", destination.display());
-        return Ok(());
-    }
-    if force && destination.exists() {
-        fs::remove_file(destination)
-            .await
-            .with_context(|| format!("无法覆盖已有文件 {}", destination.display()))?;
-    }
-
-    let partial = destination.with_extension("m4s.part");
-    if force && partial.exists() {
-        fs::remove_file(&partial)
-            .await
-            .with_context(|| format!("无法清理临时文件 {}", partial.display()))?;
-    }
-    let mut last_error = None;
-    for url in stream.urls() {
-        // 每次切换备用 CDN 都重新读取偏移，避免前一个 CDN 中途失败后重复追加数据。
-        let existing = fs::metadata(&partial)
-            .await
-            .map(|meta| meta.len())
-            .unwrap_or(0);
-        match try_download_url(
-            client,
-            url,
-            referer,
-            destination,
-            &partial,
-            label,
-            progress,
-            existing,
-        )
-        .await
-        {
-            Ok(()) => return Ok(()),
-            Err(error) => last_error = Some(error),
-        }
-    }
-    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("{label}没有可用下载地址")))
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn try_download_url(
-    client: &BiliClient,
-    url: &str,
-    referer: &str,
-    destination: &Path,
-    partial: &Path,
-    label: &str,
-    progress: &MultiProgress,
-    existing: u64,
-) -> Result<()> {
-    let mut request = client.media_get(url, referer);
-    if existing > 0 {
-        request = request.header(RANGE, format!("bytes={existing}-"));
-    }
-    let response = request.send().await.context("连接 CDN 失败")?;
-    if !response.status().is_success() {
-        bail!("CDN 返回 HTTP {}", response.status());
-    }
-    let resumed = existing > 0 && response.status() == StatusCode::PARTIAL_CONTENT;
-    let initial = if resumed { existing } else { 0 };
-    let total = response.content_length().map(|length| length + initial);
-    let bar = progress.add(make_progress_bar(label, total));
-    bar.set_position(initial);
-
-    let mut options = OpenOptions::new();
-    options.create(true).write(true);
-    if resumed {
-        options.append(true);
-    } else {
-        options.truncate(true);
-    }
-    let mut file = options
-        .open(partial)
-        .await
-        .with_context(|| format!("无法写入 {}", partial.display()))?;
-    let mut body = response.bytes_stream();
-    while let Some(chunk) = body.next().await {
-        let chunk = chunk.context("下载流中断")?;
-        file.write_all(&chunk).await.context("写入下载文件失败")?;
-        bar.inc(chunk.len() as u64);
-    }
-    file.flush().await.context("刷新下载文件失败")?;
-    drop(file);
-    bar.finish_with_message(format!("{label}完成"));
-
-    if destination.exists() {
-        fs::remove_file(destination).await?;
-    }
-    fs::rename(partial, destination)
-        .await
-        .with_context(|| format!("无法完成文件 {}", destination.display()))?;
-    Ok(())
-}
-
-fn make_progress_bar(label: &str, total: Option<u64>) -> ProgressBar {
-    let bar = total
-        .map(ProgressBar::new)
-        .unwrap_or_else(ProgressBar::new_spinner);
-    let style = if total.is_some() {
-        ProgressStyle::with_template(
-            "{prefix:.bold} [{bar:32.cyan/blue}] {bytes}/{total_bytes} {bytes_per_sec} ETA {eta}",
-        )
-    } else {
-        ProgressStyle::with_template("{prefix:.bold} {spinner} {bytes} {bytes_per_sec}")
-    }
-    .expect("static progress template")
-    .progress_chars("=>-");
-    bar.set_style(style);
-    bar.set_prefix(label.to_owned());
-    bar
+    let urls = stream.urls().map(str::to_owned).collect::<Vec<_>>();
+    http_download::download_urls(&urls, destination, label, progress, force, true, |url| {
+        client.media_get(url, referer)
+    })
+    .await
 }
 
 async fn merge_with_ffmpeg(
@@ -306,7 +193,7 @@ fn output_base(title: &str, page: usize, part: &str, quality: &str) -> String {
     sanitize_filename(&raw)
 }
 
-fn sanitize_filename(value: &str) -> String {
+pub(crate) fn sanitize_filename(value: &str) -> String {
     let mut result = value
         .chars()
         .map(|character| {

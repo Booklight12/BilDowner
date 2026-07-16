@@ -3,7 +3,7 @@
 [![Release](https://github.com/Booklight12/BilDowner/actions/workflows/release.yml/badge.svg)](https://github.com/Booklight12/BilDowner/actions/workflows/release.yml)
 [![License: BSD-2-Clause](https://img.shields.io/badge/License-BSD--2--Clause-blue.svg)](LICENSE)
 
-BilDowner 是一个纯 Rust 命令行 Bilibili 视频下载器，不包含前端页面。它参考本机 Edge 扩展“bilibili哔哩哔哩下载助手”3.0.4 的下载链路：通过 `x/player/wbi/playurl` 获取 DASH 流，分别下载视频和音频，再调用 FFmpeg 以 `copy` 模式封装为 MP4，不进行有损重新编码。
+BilDowner 是一个纯 Rust 命令行 Bilibili / 抖音视频下载器，不包含前端页面。Bilibili 通过 `x/player/wbi/playurl` 获取 DASH 流，分别下载视频和音频，再调用 FFmpeg 以 `copy` 模式封装为 MP4，不进行有损重新编码。抖音通过分享页公开的 SSR 作品数据解析 MP4 播放流，优先下载无水印地址，并在不可用时自动回退到原始播放地址。
 
 当前版本：**1.0.0 Alpha**。
 
@@ -18,6 +18,7 @@ BilDowner 是一个纯 Rust 命令行 Bilibili 视频下载器，不包含前端
 - 可选择 AVC/H.264、HEVC/H.265 或 AV1；默认优先兼容性较好的 AVC
 - `merged`、`separate`、`both` 三种输出模式
 - 视频与音频并行下载，支持 `.part` 文件续传和 DASH 备用 CDN
+- 支持抖音短分享链接和 `douyin.com/video/<作品 ID>` 链接，无需登录或额外插件
 
 ## 环境
 
@@ -52,6 +53,10 @@ cargo run -- download BV1xx411c7mD --page 2 --quality 1080p --codec avc --mode b
 cargo run -- download BV1xx411c7mD --quality 4k --codec hevc --mode merged
 cargo run -- download BV1xx411c7mD --quality 720p --mode separate --output-dir .\downloads
 cargo run -- download ep693247 --quality 1080p --mode both
+
+# 查看并下载抖音分享视频（抖音为已合并的单个 MP4，不需要 FFmpeg）
+cargo run -- info "https://v.douyin.com/KyuVvC8wEu4/"
+cargo run -- download "https://v.douyin.com/KyuVvC8wEu4/"
 ```
 
 输出模式：
@@ -82,8 +87,9 @@ cargo run -- auth clear
 4. 从同一清晰度的 `dash.video` 中按编码选择视频流，从 `dash.audio` 选择最高码率标准音频流。
 5. 下载时携带 Bilibili Referer、浏览器 User-Agent 和已保存 Cookie；主 CDN 失败时依次尝试备用地址。
 6. 合并时执行等价于 `ffmpeg -i video.m4s -i audio.m4s -map 0:v:0 -map 1:a:0 -c copy output.mp4` 的命令。
+7. 抖音链接先解析为作品 ID，再读取 `www.douyin.com/share/video/<作品 ID>` 页面内的 `_ROUTER_DATA`；下载器优先尝试 `play` 无水印地址，并以页面提供的 `playwm` 地址兜底。
 
-站点接口可能变化；遇到问题时先运行 `cargo run -- info <链接>`，它会给出当前账号实际可用的清晰度和编码。
+站点接口可能变化；遇到问题时先运行 `cargo run -- info <链接>`。Bilibili 会给出当前账号实际可用的清晰度和编码，抖音会显示分享页公开的作品信息。
 
 ## 开源许可证
 

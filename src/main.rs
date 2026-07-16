@@ -1,7 +1,9 @@
 mod api;
 mod auth;
 mod cli;
+mod douyin;
 mod download;
+mod http_download;
 
 use anyhow::Result;
 use clap::Parser;
@@ -17,25 +19,37 @@ async fn main() {
 
 async fn run() -> Result<()> {
     let cli = Cli::parse();
-    let store = auth::AuthStore::new()?;
 
     match cli.command {
-        Command::Auth { command } => match command {
-            AuthCommand::Qr => auth::qr_login(&store).await,
-            AuthCommand::Set {
-                cookie,
-                cookie_file,
-            } => auth::set_cookie(&store, cookie, cookie_file),
-            AuthCommand::Status => auth::status(&store).await,
-            AuthCommand::Clear => auth::clear(&store),
-        },
+        Command::Auth { command } => {
+            let store = auth::AuthStore::new()?;
+            match command {
+                AuthCommand::Qr => auth::qr_login(&store).await,
+                AuthCommand::Set {
+                    cookie,
+                    cookie_file,
+                } => auth::set_cookie(&store, cookie, cookie_file),
+                AuthCommand::Status => auth::status(&store).await,
+                AuthCommand::Clear => auth::clear(&store),
+            }
+        }
         Command::Info { input, page } => {
-            let client = api::BiliClient::new(store.load()?)?;
-            api::print_info(&client, &input, page).await
+            if douyin::is_douyin_input(&input) {
+                douyin::print_info(&input).await
+            } else {
+                let store = auth::AuthStore::new()?;
+                let client = api::BiliClient::new(store.load()?)?;
+                api::print_info(&client, &input, page).await
+            }
         }
         Command::Download(args) => {
-            let client = api::BiliClient::new(store.load()?)?;
-            download::run(&client, args).await
+            if douyin::is_douyin_input(&args.input) {
+                douyin::download(args).await
+            } else {
+                let store = auth::AuthStore::new()?;
+                let client = api::BiliClient::new(store.load()?)?;
+                download::run(&client, args).await
+            }
         }
     }
 }
