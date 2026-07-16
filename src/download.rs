@@ -7,7 +7,7 @@ use tokio::{fs, process::Command};
 use crate::{
     api::{BiliClient, DashStream, codec_name},
     cli::{DownloadArgs, DownloadMode},
-    http_download,
+    http_download, mux,
 };
 
 pub async fn run(client: &BiliClient, args: DownloadArgs) -> Result<()> {
@@ -19,6 +19,12 @@ pub async fn run(client: &BiliClient, args: DownloadArgs) -> Result<()> {
         .play_info_for_page(bvid, page.cid, page.ep_id, requested_qn)
         .await?;
     let (video, audio, quality_description) = play.select_streams(&args.quality, args.codec)?;
+    if args.mode.needs_merge() && args.ffmpeg.is_none() && video.codecid != 7 {
+        bail!(
+            "内置 MP4 合并目前仅支持 AVC/H.264；请使用 `--codec avc`、传入 `--ffmpeg`，或用 `--mode separate` 保留 {} 分离流",
+            codec_name(video.codecid, &video.codecs)
+        );
+    }
 
     fs::create_dir_all(&args.output_dir)
         .await
@@ -67,14 +73,11 @@ pub async fn run(client: &BiliClient, args: DownloadArgs) -> Result<()> {
     tokio::try_join!(video_download, audio_download)?;
 
     if args.mode.needs_merge() {
-        merge_with_ffmpeg(
-            &args.ffmpeg,
-            &video_path,
-            &audio_path,
-            &merged_path,
-            args.force,
-        )
-        .await?;
+        if let Some(ffmpeg) = args.ffmpeg.as_deref() {
+            merge_with_ffmpeg(ffmpeg, &video_path, &audio_path, &merged_path, args.force).await?;
+        } else {
+            merge_with_rust(&video_path, &audio_path, &merged_path, args.force).await?;
+        }
         println!("合并文件：{}", merged_path.display());
     }
     if args.mode.keeps_separate() {
@@ -126,6 +129,40 @@ async fn download_stream(
     .await
 }
 
+async fn merge_with_rust(video: &Path, audio: &Path, output: &Path, force: bool) -> Result<()> {
+    if output.exists() && !force {
+        println!("合并文件已存在，跳过：{}", output.display());
+        return Ok(());
+    }
+    let temporary = output.with_extension("tmp.mp4");
+    if temporary.exists() {
+        fs::remove_file(&temporary)
+            .await
+            .with_context(|| format!("无法清理 MP4 临时文件 {}", temporary.display()))?;
+    }
+    println!("正在用内置 MP4 封装器无重新编码合并……");
+    let video = video.to_owned();
+    let audio = audio.to_owned();
+    let temporary_for_task = temporary.clone();
+    let result =
+        tokio::task::spawn_blocking(move || mux::mux_avc_aac(&video, &audio, &temporary_for_task))
+            .await
+            .context("内置 MP4 合并任务异常终止")?;
+    if let Err(error) = result {
+        fs::remove_file(&temporary).await.ok();
+        return Err(error);
+    }
+    if output.exists() {
+        fs::remove_file(output)
+            .await
+            .with_context(|| format!("无法覆盖合并文件 {}", output.display()))?;
+    }
+    fs::rename(&temporary, output)
+        .await
+        .with_context(|| format!("无法完成合并文件 {}", output.display()))?;
+    Ok(())
+}
+
 async fn merge_with_ffmpeg(
     ffmpeg: &Path,
     video: &Path,
@@ -165,7 +202,7 @@ async fn merge_with_ffmpeg(
         .await
         .with_context(|| {
             format!(
-                "无法启动 FFmpeg `{}`；请安装 FFmpeg 或通过 --ffmpeg 指定路径",
+                "无法启动 FFmpeg `{}`；请安装 FFmpeg 或传入正确的 --ffmpeg 路径",
                 ffmpeg.display()
             )
         })?;

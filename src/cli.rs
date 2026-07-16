@@ -76,9 +76,9 @@ pub struct DownloadArgs {
     #[arg(short, long, default_value = "downloads")]
     pub output_dir: PathBuf,
 
-    /// FFmpeg 可执行文件路径
-    #[arg(long, default_value = "ffmpeg")]
-    pub ffmpeg: PathBuf,
+    /// 改用 FFmpeg 合并；可省略 PATH 以使用 PATH 中的 ffmpeg
+    #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "ffmpeg")]
+    pub ffmpeg: Option<PathBuf>,
 
     /// 覆盖已经存在的文件
     #[arg(long)]
@@ -122,5 +122,46 @@ impl DownloadMode {
 
     pub fn keeps_separate(self) -> bool {
         matches!(self, Self::Separate | Self::Both)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use clap::Parser;
+
+    use super::{Cli, Command};
+
+    #[test]
+    fn ffmpeg_is_opt_in_with_optional_path() {
+        let cli = Cli::try_parse_from(["bildowner", "download", "BV1xx411c7mD"]).unwrap();
+        let Command::Download(args) = cli.command else {
+            panic!("expected download command");
+        };
+        assert!(args.ffmpeg.is_none());
+
+        let cli =
+            Cli::try_parse_from(["bildowner", "download", "BV1xx411c7mD", "--ffmpeg"]).unwrap();
+        let Command::Download(args) = cli.command else {
+            panic!("expected download command");
+        };
+        assert_eq!(args.ffmpeg.as_deref(), Some(Path::new("ffmpeg")));
+
+        let cli = Cli::try_parse_from([
+            "bildowner",
+            "download",
+            "BV1xx411c7mD",
+            "--ffmpeg",
+            "C:/Tools/ffmpeg.exe",
+        ])
+        .unwrap();
+        let Command::Download(args) = cli.command else {
+            panic!("expected download command");
+        };
+        assert_eq!(
+            args.ffmpeg.as_deref(),
+            Some(Path::new("C:/Tools/ffmpeg.exe"))
+        );
     }
 }

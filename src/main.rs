@@ -4,6 +4,7 @@ mod cli;
 mod douyin;
 mod download;
 mod http_download;
+mod mux;
 
 use anyhow::Result;
 use clap::Parser;

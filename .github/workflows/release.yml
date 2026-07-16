@@ -45,6 +45,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "${{ github.ref_name }}"
+          $releaseTitleVersion = ($tag -replace '^v', '') -replace '-alpha$', ' Alpha'
           $assetBase = "BilDowner-$tag-windows-x86_64"
           $dist = Join-Path $PWD "dist"
           New-Item -ItemType Directory -Path $dist -Force | Out-Null
@@ -64,6 +65,6 @@ jobs:
 
           gh release create $tag $exe $zip $checksums `
             --verify-tag `
-            --title "BilDowner 1.0.0 Alpha" `
+            --title "BilDowner $releaseTitleVersion" `
             --prerelease `
             --generate-notes
