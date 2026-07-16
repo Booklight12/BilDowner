@@ -4,7 +4,6 @@
 [![License: BSD-2-Clause](https://img.shields.io/badge/License-BSD--2--Clause-blue.svg)](LICENSE)
 
 BilDowner 是一个纯 Rust 命令行 Bilibili / 抖音视频下载器，不包含前端页面。Bilibili 通过 `x/player/wbi/playurl` 获取 DASH 流，分别下载视频和音频，再调用 FFmpeg 以 `copy` 模式封装为 MP4，不进行有损重新编码。抖音通过分享页公开的 SSR 作品数据解析 MP4 播放流，优先下载无水印地址，并在不可用时自动回退到原始播放地址。
-
 当前版本：**1.0.0 Alpha**。
 
 请只下载你有权保存的内容。本工具不会绕过 DRM、付费或账号权限；接口返回的清晰度取决于当前账号本身具有的播放权限。
