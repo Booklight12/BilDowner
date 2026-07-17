@@ -3,7 +3,7 @@ name = "bildowner"
 version = "1.1.0-alpha"
 edition = "2024"
 authors = ["SorMaze"]
-description = "A pure-Rust command-line Bilibili and Douyin video downloader"
+description = "A pure-Rust command-line Bilibili, Douyin, and X video downloader"
 license = "BSD-2-Clause"
 readme = "README.md"
 repository = "https://github.com/Booklight12/BilDowner"
@@ -24,4 +24,4 @@ tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-m
 url = "2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Networking_WinInet", "Win32_Security_Cryptography"] }

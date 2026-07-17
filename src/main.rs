@@ -5,6 +5,9 @@ mod douyin;
 mod download;
 mod http_download;
 mod mux;
+#[cfg(windows)]
+mod wininet;
+mod x;
 
 use anyhow::Result;
 use clap::Parser;
@@ -37,6 +40,8 @@ async fn run() -> Result<()> {
         Command::Info { input, page } => {
             if douyin::is_douyin_input(&input) {
                 douyin::print_info(&input).await
+            } else if x::is_x_input(&input) {
+                x::print_info(&input).await
             } else {
                 let store = auth::AuthStore::new()?;
                 let client = api::BiliClient::new(store.load()?)?;
@@ -46,6 +51,8 @@ async fn run() -> Result<()> {
         Command::Download(args) => {
             if douyin::is_douyin_input(&args.input) {
                 douyin::download(args).await
+            } else if x::is_x_input(&args.input) {
+                x::download(args).await
             } else {
                 let store = auth::AuthStore::new()?;
                 let client = api::BiliClient::new(store.load()?)?;
