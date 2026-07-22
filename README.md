@@ -45,6 +45,7 @@ Get-Clipboard | cargo run -- auth set
 # 查看分 P、清晰度和编码
 cargo run -- info "https://www.bilibili.com/video/BV1xx411c7mD"
 cargo run -- info BV1xx411c7mD --page 1
+cargo run -- info BV1xx411c7mD --page "1-3,5,7"
 cargo run -- info "https://www.bilibili.com/bangumi/play/ss43164" --page 2
 
 # 默认下载最高可用清晰度，同时保留分离流和合并 MP4
@@ -52,6 +53,8 @@ cargo run -- download BV1xx411c7mD
 
 # 选择清晰度、分 P、编码和输出模式
 cargo run -- download BV1xx411c7mD --page 2 --quality 1080p --codec avc --mode both
+cargo run -- download BV1xx411c7mD --page "1-7" --quality 1080p
+cargo run -- download BV1xx411c7mD --page "5,7" --quality 1080p
 cargo run -- download BV1xx411c7mD --quality 4k --codec hevc --mode merged --ffmpeg
 cargo run -- download BV1xx411c7mD --quality 720p --mode separate --output-dir .\downloads
 cargo run -- download ep693247 --quality 1080p --mode both
@@ -65,6 +68,8 @@ cargo run -- info "https://x.com/Kimi_Moonshot/status/2077521842080817296"
 cargo run -- download "https://x.com/Kimi_Moonshot/status/2077521842080817296"
 cargo run -- download "https://x.com/Kimi_Moonshot/status/2077521842080817296" --quality 1080p
 ```
+
+`--page` 支持单个序号（`7`）、闭区间（`1-7`）、逗号列表（`5,7`）及其组合。显式 `--page` 优先于 Bilibili 链接中的 `p=`；未指定时会使用链接中的分 P，链接也未指定时默认 P1。对没有分 P 的视频传入 `--page` 不会中止，而是忽略参数并显示警告。
 
 输出模式：
 

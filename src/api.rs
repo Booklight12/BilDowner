@@ -239,39 +239,44 @@ impl BiliClient {
     }
 }
 
-pub async fn print_info(client: &BiliClient, input: &str, page: usize) -> Result<()> {
+pub async fn print_info(client: &BiliClient, input: &str, page: Option<&str>) -> Result<()> {
     let info = client.video_info(input).await?;
     println!("{}\nBV: {}  AV: {}", info.title, info.bvid, info.aid);
     println!("分 P：");
     for item in &info.pages {
         println!("  P{}  {:>6}s  {}", item.page, item.duration, item.part);
     }
-    let selected = info.page(page)?;
-    let play = client
-        .play_info_for_page(info.page_bvid(selected), selected.cid, selected.ep_id, 127)
-        .await?;
-    println!("\nP{} 可用清晰度：", selected.page);
-    for quality in play.available_qualities() {
-        let codecs = play
-            .dash
-            .as_ref()
-            .map(|dash| {
-                dash.video
-                    .iter()
-                    .filter(|stream| stream.id == quality)
-                    .map(|stream| codec_name(stream.codecid, &stream.codecs))
-                    .collect::<BTreeSet<_>>()
-                    .into_iter()
-                    .collect::<Vec<_>>()
-                    .join("/")
-            })
-            .unwrap_or_default();
-        println!(
-            "  {:>3}  {:<14} {}",
-            quality,
-            play.quality_description(quality),
-            codecs
-        );
+
+    let selection = info.resolve_pages(input, page)?;
+    print_page_selection_notice(&info, page, &selection, "检查");
+    for page_number in selection.pages {
+        let selected = info.page(page_number)?;
+        let play = client
+            .play_info_for_page(info.page_bvid(selected), selected.cid, selected.ep_id, 127)
+            .await?;
+        println!("\nP{} 可用清晰度：", selected.page);
+        for quality in play.available_qualities() {
+            let codecs = play
+                .dash
+                .as_ref()
+                .map(|dash| {
+                    dash.video
+                        .iter()
+                        .filter(|stream| stream.id == quality)
+                        .map(|stream| codec_name(stream.codecid, &stream.codecs))
+                        .collect::<BTreeSet<_>>()
+                        .into_iter()
+                        .collect::<Vec<_>>()
+                        .join("/")
+                })
+                .unwrap_or_default();
+            println!(
+                "  {:>3}  {:<14} {}",
+                quality,
+                play.quality_description(quality),
+                codecs
+            );
+        }
     }
     if client.cookie.is_none() {
         println!("\n当前未登录；登录后通常可获得更高清晰度。");
@@ -336,6 +341,80 @@ impl VideoInfo {
 
     pub fn page_bvid<'a>(&'a self, page: &'a VideoPage) -> &'a str {
         page.bvid.as_deref().unwrap_or(&self.bvid)
+    }
+
+    pub fn resolve_pages(&self, input: &str, selection: Option<&str>) -> Result<PageSelection> {
+        if self.pages.is_empty() {
+            bail!("视频信息中没有可下载的分 P");
+        }
+        if self.pages.len() == 1 {
+            return Ok(PageSelection {
+                pages: vec![1],
+                source: PageSelectionSource::SinglePage,
+            });
+        }
+
+        if let Some(selection) = selection {
+            return Ok(PageSelection {
+                pages: parse_page_selection(selection, self.pages.len())?,
+                source: PageSelectionSource::Explicit,
+            });
+        }
+        if let Some(page) = page_from_url(input)? {
+            self.page(page)?;
+            return Ok(PageSelection {
+                pages: vec![page],
+                source: PageSelectionSource::Url,
+            });
+        }
+        Ok(PageSelection {
+            pages: vec![1],
+            source: PageSelectionSource::Default,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageSelectionSource {
+    Explicit,
+    Url,
+    Default,
+    SinglePage,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct PageSelection {
+    pub pages: Vec<usize>,
+    pub source: PageSelectionSource,
+}
+
+pub fn print_page_selection_notice(
+    info: &VideoInfo,
+    explicit: Option<&str>,
+    selection: &PageSelection,
+    action: &str,
+) {
+    match selection.source {
+        PageSelectionSource::SinglePage if explicit.is_some() => eprintln!(
+            "警告：该视频没有分 P；已忽略 --page `{}`，将{}唯一的视频。",
+            explicit.unwrap_or_default(),
+            action
+        ),
+        PageSelectionSource::Default => eprintln!(
+            "提示：检测到 {} 个分 P，未指定 --page，默认{} P1。",
+            info.pages.len(),
+            action
+        ),
+        PageSelectionSource::Explicit | PageSelectionSource::Url => println!(
+            "已选择分 P：{}",
+            selection
+                .pages
+                .iter()
+                .map(|page| format!("P{page}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        PageSelectionSource::SinglePage => {}
     }
 }
 
@@ -563,6 +642,77 @@ enum VideoId {
     Season(u64),
 }
 
+fn page_from_url(input: &str) -> Result<Option<usize>> {
+    let Ok(url) = Url::parse(input.trim()) else {
+        return Ok(None);
+    };
+    let Some(value) = url
+        .query_pairs()
+        .find(|(key, _)| key.eq_ignore_ascii_case("p"))
+        .map(|(_, value)| value.into_owned())
+    else {
+        return Ok(None);
+    };
+    let page = value
+        .parse::<usize>()
+        .with_context(|| format!("链接中的分 P 参数 `p={value}` 不合法"))?;
+    if page == 0 {
+        bail!("链接中的分 P 参数必须从 1 开始");
+    }
+    Ok(Some(page))
+}
+
+fn parse_page_selection(value: &str, page_count: usize) -> Result<Vec<usize>> {
+    let value = value.trim();
+    if value.is_empty() {
+        bail!("--page 不能为空");
+    }
+
+    let mut pages = Vec::new();
+    let mut seen = BTreeSet::new();
+    for item in value.split(',') {
+        let item = item.trim();
+        if item.is_empty() {
+            bail!("--page `{value}` 中存在空的分 P 序号");
+        }
+        if let Some((start, end)) = item.split_once('-') {
+            if end.contains('-') {
+                bail!("无法识别分 P 范围 `{item}`");
+            }
+            let start = parse_page_number(start, page_count)?;
+            let end = parse_page_number(end, page_count)?;
+            if start > end {
+                bail!("分 P 范围 `{item}` 的起点不能大于终点");
+            }
+            for page in start..=end {
+                if seen.insert(page) {
+                    pages.push(page);
+                }
+            }
+        } else {
+            let page = parse_page_number(item, page_count)?;
+            if seen.insert(page) {
+                pages.push(page);
+            }
+        }
+    }
+    Ok(pages)
+}
+
+fn parse_page_number(value: &str, page_count: usize) -> Result<usize> {
+    let value = value.trim();
+    let page = value
+        .parse::<usize>()
+        .with_context(|| format!("分 P 序号 `{value}` 不合法"))?;
+    if page == 0 {
+        bail!("分 P 序号必须从 1 开始");
+    }
+    if page > page_count {
+        bail!("P{page} 不存在；该视频共有 {page_count} 个分 P");
+    }
+    Ok(page)
+}
+
 fn parse_video_id(input: &str) -> Result<VideoId> {
     let re = Regex::new(r"(?i)(BV[0-9A-Za-z]+|av[0-9]+|ep[0-9]+|ss[0-9]+)").expect("static regex");
     let value = re
@@ -693,7 +843,28 @@ pub fn codec_name(codecid: u32, codecs: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_quality, parse_video_id};
+    use super::{
+        PageSelectionSource, VideoInfo, VideoPage, parse_page_selection, parse_quality,
+        parse_video_id,
+    };
+
+    fn video_info(page_count: usize) -> VideoInfo {
+        VideoInfo {
+            bvid: "BV1xx411c7mD".to_owned(),
+            aid: 1,
+            title: "demo".to_owned(),
+            pages: (1..=page_count)
+                .map(|page| VideoPage {
+                    cid: page as u64,
+                    page,
+                    part: format!("part {page}"),
+                    duration: 60,
+                    bvid: None,
+                    ep_id: None,
+                })
+                .collect(),
+        }
+    }
 
     #[test]
     fn parses_bv_from_url() {
@@ -713,6 +884,56 @@ mod tests {
             parse_video_id("ss43164").unwrap(),
             super::VideoId::Season(43164)
         ));
+    }
+
+    #[test]
+    fn parses_page_numbers_ranges_and_lists() {
+        assert_eq!(parse_page_selection("7", 10).unwrap(), vec![7]);
+        assert_eq!(
+            parse_page_selection("1-7", 10).unwrap(),
+            (1..=7).collect::<Vec<_>>()
+        );
+        assert_eq!(parse_page_selection("5,7", 10).unwrap(), vec![5, 7]);
+        assert_eq!(
+            parse_page_selection("1-3, 5, 3, 7", 10).unwrap(),
+            vec![1, 2, 3, 5, 7]
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_page_selections() {
+        assert!(parse_page_selection("", 10).is_err());
+        assert!(parse_page_selection("0", 10).is_err());
+        assert!(parse_page_selection("7-1", 10).is_err());
+        assert!(parse_page_selection("1,,2", 10).is_err());
+        assert!(parse_page_selection("11", 10).is_err());
+    }
+
+    #[test]
+    fn resolves_explicit_url_and_default_page_sources() {
+        let info = video_info(8);
+        let input = "https://www.bilibili.com/video/BV1pVkrYeEer?spm_id_from=333.788.videopod.sections&vd_source=test&p=7";
+
+        let explicit = info.resolve_pages(input, Some("5,7")).unwrap();
+        assert_eq!(explicit.pages, vec![5, 7]);
+        assert_eq!(explicit.source, PageSelectionSource::Explicit);
+
+        let from_url = info.resolve_pages(input, None).unwrap();
+        assert_eq!(from_url.pages, vec![7]);
+        assert_eq!(from_url.source, PageSelectionSource::Url);
+
+        let default = info.resolve_pages("BV1xx411c7mD", None).unwrap();
+        assert_eq!(default.pages, vec![1]);
+        assert_eq!(default.source, PageSelectionSource::Default);
+    }
+
+    #[test]
+    fn ignores_page_selection_for_single_page_video() {
+        let selection = video_info(1)
+            .resolve_pages("https://www.bilibili.com/video/BV1xx411c7mD?p=7", Some("7"))
+            .unwrap();
+        assert_eq!(selection.pages, vec![1]);
+        assert_eq!(selection.source, PageSelectionSource::SinglePage);
     }
 
     #[test]

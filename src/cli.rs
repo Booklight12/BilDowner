@@ -24,9 +24,9 @@ pub enum Command {
     Info {
         /// BV/AV/ep/ss 号、Bilibili/抖音链接或 X 帖子链接
         input: String,
-        /// 分 P 序号，从 1 开始
-        #[arg(short, long, default_value_t = 1)]
-        page: usize,
+        /// 分 P：单个序号、闭区间或逗号列表，例如 7、1-7、5,7
+        #[arg(short, long, value_name = "PAGES")]
+        page: Option<String>,
     },
     /// 下载视频
     Download(DownloadArgs),
@@ -60,9 +60,9 @@ pub struct DownloadArgs {
     #[arg(short, long, default_value = "best")]
     pub quality: String,
 
-    /// 分 P 序号，从 1 开始
-    #[arg(short, long, default_value_t = 1)]
-    pub page: usize,
+    /// 分 P：单个序号、闭区间或逗号列表，例如 7、1-7、5,7
+    #[arg(short, long, value_name = "PAGES")]
+    pub page: Option<String>,
 
     /// 视频编码偏好
     #[arg(long, value_enum, default_value_t = CodecChoice::Auto)]
@@ -140,6 +140,7 @@ mod tests {
             panic!("expected download command");
         };
         assert!(args.ffmpeg.is_none());
+        assert!(args.page.is_none());
 
         let cli =
             Cli::try_parse_from(["bildowner", "download", "BV1xx411c7mD", "--ffmpeg"]).unwrap();
@@ -163,5 +164,23 @@ mod tests {
             args.ffmpeg.as_deref(),
             Some(Path::new("C:/Tools/ffmpeg.exe"))
         );
+    }
+
+    #[test]
+    fn keeps_page_selection_expression() {
+        let cli =
+            Cli::try_parse_from(["bildowner", "download", "BV1xx411c7mD", "--page", "1-3,5,7"])
+                .unwrap();
+        let Command::Download(args) = cli.command else {
+            panic!("expected download command");
+        };
+        assert_eq!(args.page.as_deref(), Some("1-3,5,7"));
+
+        let cli =
+            Cli::try_parse_from(["bildowner", "info", "BV1xx411c7mD", "--page", "7"]).unwrap();
+        let Command::Info { page, .. } = cli.command else {
+            panic!("expected info command");
+        };
+        assert_eq!(page.as_deref(), Some("7"));
     }
 }

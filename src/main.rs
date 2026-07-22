@@ -45,7 +45,7 @@ async fn run() -> Result<()> {
             } else {
                 let store = auth::AuthStore::new()?;
                 let client = api::BiliClient::new(store.load()?)?;
-                api::print_info(&client, &input, page).await
+                api::print_info(&client, &input, page.as_deref()).await
             }
         }
         Command::Download(args) => {

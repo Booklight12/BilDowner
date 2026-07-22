@@ -5,14 +5,32 @@ use indicatif::MultiProgress;
 use tokio::{fs, process::Command};
 
 use crate::{
-    api::{BiliClient, DashStream, codec_name},
+    api::{BiliClient, DashStream, VideoInfo, VideoPage, codec_name, print_page_selection_notice},
     cli::{DownloadArgs, DownloadMode},
     http_download, mux,
 };
 
 pub async fn run(client: &BiliClient, args: DownloadArgs) -> Result<()> {
     let info = client.video_info(&args.input).await?;
-    let page = info.page(args.page)?;
+    let selection = info.resolve_pages(&args.input, args.page.as_deref())?;
+    print_page_selection_notice(&info, args.page.as_deref(), &selection, "下载");
+
+    fs::create_dir_all(&args.output_dir)
+        .await
+        .with_context(|| format!("无法创建输出目录 {}", args.output_dir.display()))?;
+    for page_number in selection.pages {
+        let page = info.page(page_number)?;
+        download_page(client, &info, page, &args).await?;
+    }
+    Ok(())
+}
+
+async fn download_page(
+    client: &BiliClient,
+    info: &VideoInfo,
+    page: &VideoPage,
+    args: &DownloadArgs,
+) -> Result<()> {
     let bvid = info.page_bvid(page);
     let requested_qn = requested_qn(&args.quality);
     let play = client
@@ -26,9 +44,6 @@ pub async fn run(client: &BiliClient, args: DownloadArgs) -> Result<()> {
         );
     }
 
-    fs::create_dir_all(&args.output_dir)
-        .await
-        .with_context(|| format!("无法创建输出目录 {}", args.output_dir.display()))?;
     let base = output_base(&info.title, page.page, &page.part, &quality_description);
     let video_path = args.output_dir.join(format!("{base}.video.m4s"));
     let audio_path = args.output_dir.join(format!("{base}.audio.m4s"));
